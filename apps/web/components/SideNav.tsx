@@ -91,6 +91,11 @@ export const useNavigation = () => {
   const manageItems: NavItem[] = useMemo(
     () => [
       {
+        name: "Mail",
+        href: prefixPath(currentEmailAccountId, "/mail"),
+        icon: InboxIcon,
+      },
+      {
         name: "Chat",
         href: prefixPath(currentEmailAccountId, "/assistant"),
         icon: MessageSquareIcon,
