@@ -29,6 +29,15 @@ vi.mock("@/providers/EmailAccountProvider", () => ({
   useAccount: () => mockUseAccount(),
 }));
 
+vi.mock("@/providers/ChatProvider", () => ({
+  useChat: () => ({
+    submitTextMessage: vi.fn(),
+    chat: { status: "ready" },
+    chatId: "test-chat-id",
+    persistedMessageIds: new Set(),
+  }),
+}));
+
 vi.mock("@/components/assistant-chat/email-lookup-context", () => ({
   useEmailLookup: () => mockUseEmailLookup(),
 }));
