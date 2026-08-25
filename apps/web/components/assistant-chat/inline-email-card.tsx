@@ -20,6 +20,7 @@ import {
   InfoIcon,
   MailOpenIcon,
   MoreVerticalIcon,
+  ReplyIcon,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -30,6 +31,7 @@ import {
 import { useEmailLookup } from "@/components/assistant-chat/email-lookup-context";
 import { useInlineEmailActionContext } from "@/components/assistant-chat/inline-email-action-context";
 import { useAccount } from "@/providers/EmailAccountProvider";
+import { useChat } from "@/providers/ChatProvider";
 import {
   archiveThreadAction,
   markReadThreadAction,
@@ -322,6 +324,7 @@ export function InlineEmailCard({
   const listState = useContext(InlineEmailListContext);
   const inlineEmailActionContext = useInlineEmailActionContext();
   const { emailAccountId, provider, userEmail } = useAccount();
+  const { submitTextMessage, chat } = useChat();
   const [actionState, setActionState] = useState<ActionState>("idle");
   const [markReadState, setMarkReadState] = useState<ActionState>("idle");
   const [expanded, setExpanded] = useState(false);
@@ -383,6 +386,23 @@ export function InlineEmailCard({
       toastError({ description: "Failed to mark as read" });
       setMarkReadState("idle");
     }
+  }
+
+  async function handleReplyWithAI() {
+    if (!threadId || chat.status !== "ready") {
+      if (chat.status !== "ready") {
+        toastError({
+          description: "Please wait for the current response to finish.",
+        });
+      }
+      return;
+    }
+
+    const subject = meta?.subject ?? "this email";
+    const from = meta?.from ?? "the sender";
+    const prompt = `Draft a reply to the email from ${from} with subject "${subject}" (thread ID: ${threadId}). Read the email first, then compose an appropriate reply.`;
+
+    await submitTextMessage(prompt);
   }
 
   const isDone = actionState === "done" || isArchived;
@@ -492,6 +512,10 @@ export function InlineEmailCard({
                     <MailOpenIcon className="mr-2 size-4" />
                   )}
                   {markReadComplete ? "Marked read" : "Mark as read"}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleReplyWithAI}>
+                  <ReplyIcon className="mr-2 size-4" />
+                  Reply with AI
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={() => {

@@ -43,6 +43,7 @@ import {
   CopyIcon,
   CheckIcon,
   SendIcon,
+  CalendarIcon,
 } from "lucide-react";
 import { toastError, toastSuccess } from "@/components/Toast";
 import { Tooltip } from "@/components/Tooltip";
@@ -547,6 +548,336 @@ export function ForwardEmailResult({
       disableConfirm={disableConfirm}
     />
   );
+}
+
+// --- Calendar Event Action Results ---
+
+type PendingCalendarActionType =
+  | "create_calendar_event"
+  | "update_calendar_event"
+  | "cancel_calendar_event";
+
+type CalendarConfirmationResult = {
+  actionType: PendingCalendarActionType;
+  eventId?: string | null;
+  eventUrl?: string | null;
+  confirmedAt: string;
+};
+
+export function CreateCalendarEventResult({
+  output,
+  chatMessageId,
+  toolCallId,
+  disableConfirm,
+}: {
+  output: unknown;
+  chatMessageId: string;
+  toolCallId: string;
+  disableConfirm: boolean;
+}) {
+  return (
+    <CalendarActionResult
+      actionType="create_calendar_event"
+      output={output}
+      chatMessageId={chatMessageId}
+      toolCallId={toolCallId}
+      disableConfirm={disableConfirm}
+    />
+  );
+}
+
+export function UpdateCalendarEventResult({
+  output,
+  chatMessageId,
+  toolCallId,
+  disableConfirm,
+}: {
+  output: unknown;
+  chatMessageId: string;
+  toolCallId: string;
+  disableConfirm: boolean;
+}) {
+  return (
+    <CalendarActionResult
+      actionType="update_calendar_event"
+      output={output}
+      chatMessageId={chatMessageId}
+      toolCallId={toolCallId}
+      disableConfirm={disableConfirm}
+    />
+  );
+}
+
+export function CancelCalendarEventResult({
+  output,
+  chatMessageId,
+  toolCallId,
+  disableConfirm,
+}: {
+  output: unknown;
+  chatMessageId: string;
+  toolCallId: string;
+  disableConfirm: boolean;
+}) {
+  return (
+    <CalendarActionResult
+      actionType="cancel_calendar_event"
+      output={output}
+      chatMessageId={chatMessageId}
+      toolCallId={toolCallId}
+      disableConfirm={disableConfirm}
+    />
+  );
+}
+
+function CalendarActionResult({
+  actionType,
+  output,
+  chatMessageId,
+  toolCallId,
+  disableConfirm,
+}: {
+  actionType: PendingCalendarActionType;
+  output: unknown;
+  chatMessageId: string;
+  toolCallId: string;
+  disableConfirm: boolean;
+}) {
+  const { emailAccountId } = useAccount();
+  const { chatId, persistedMessageIds } = useChat();
+  const [isConfirming, setIsConfirming] = useState(false);
+  const [confirmationResultOverride, setConfirmationResultOverride] =
+    useState<CalendarConfirmationResult | null>(null);
+
+  const pendingAction = getOutputField<Record<string, unknown>>(
+    output,
+    "pendingAction",
+  );
+  const requiresConfirmation =
+    getOutputField<boolean>(output, "requiresConfirmation") === true;
+  const confirmationState =
+    getOutputField<string>(output, "confirmationState") || "pending";
+  const parsedConfirmationResult = parseCalendarConfirmationResult(
+    getOutputField<unknown>(output, "confirmationResult"),
+  );
+  const confirmationResult =
+    confirmationResultOverride || parsedConfirmationResult;
+  const isProcessing = confirmationState === "processing";
+  const isPersistedMessage = persistedMessageIds.has(chatMessageId);
+  const isConfirmed =
+    confirmationState === "confirmed" ||
+    Boolean(confirmationResult) ||
+    (!requiresConfirmation &&
+      getOutputField<boolean>(output, "success") === true);
+
+  const title = getPendingString(pendingAction, "title") ?? "Calendar Event";
+  const startTime = getPendingString(pendingAction, "startTime");
+  const endTime = getPendingString(pendingAction, "endTime");
+  const description = getPendingString(pendingAction, "description");
+  const location = getPendingString(pendingAction, "location");
+  const timezone = getPendingString(pendingAction, "timezone") ?? "UTC";
+  const attendees = pendingAction
+    ? (pendingAction.attendees as string[] | undefined)
+    : undefined;
+
+  const formattedStart = startTime ? formatCalendarDateTime(startTime) : null;
+  const formattedEnd = endTime ? formatCalendarDateTime(endTime) : null;
+
+  const handleConfirm = async () => {
+    setIsConfirming(true);
+    try {
+      if (!chatId) {
+        toastError({
+          description: "Could not confirm this calendar action.",
+        });
+        return;
+      }
+
+      const { confirmAssistantCalendarAction } = await import(
+        "@/utils/actions/assistant-chat"
+      );
+
+      const result = await confirmAssistantCalendarAction(emailAccountId, {
+        chatId,
+        toolCallId,
+        actionType,
+      });
+
+      if (result?.serverError) {
+        toastError({ description: result.serverError });
+        return;
+      }
+
+      const parsed = parseCalendarConfirmationResult(
+        result?.data?.confirmationResult,
+      );
+      if (!parsed) {
+        toastError({
+          description: "Could not confirm this calendar action.",
+        });
+        return;
+      }
+
+      setConfirmationResultOverride(parsed);
+      toastSuccess({
+        description: getCalendarActionSuccessMessage(actionType),
+      });
+    } catch {
+      toastError({ description: "Could not confirm this calendar action." });
+    } finally {
+      setIsConfirming(false);
+    }
+  };
+
+  const actionLabel = getCalendarActionLabel(actionType);
+  const confirmedLabel = getCalendarActionConfirmedLabel(actionType);
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center gap-3 space-y-0 border-b px-4 py-3.5">
+        <div className="flex size-8 items-center justify-center rounded-full bg-primary/10 text-primary">
+          <CalendarIcon className="size-4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-semibold leading-tight">
+            {actionLabel}: {title}
+          </div>
+          {formattedStart && formattedEnd && (
+            <div className="mt-0.5 text-xs text-muted-foreground">
+              {formattedStart} — {formattedEnd}
+              {timezone !== "UTC" ? ` (${timezone})` : ""}
+            </div>
+          )}
+        </div>
+        {isConfirmed && (
+          <div className="flex items-center gap-1 text-xs font-medium text-green-600">
+            <CheckIcon className="size-3.5" />
+            {confirmedLabel}
+          </div>
+        )}
+      </CardHeader>
+      <CardContent className="px-4 py-3">
+        <div className="space-y-2 text-sm">
+          {description && (
+            <div>
+              <span className="text-xs font-medium text-muted-foreground">
+                Description:
+              </span>{" "}
+              <span className="text-foreground">{description}</span>
+            </div>
+          )}
+          {location && (
+            <div>
+              <span className="text-xs font-medium text-muted-foreground">
+                Location:
+              </span>{" "}
+              <span className="text-foreground">{location}</span>
+            </div>
+          )}
+          {attendees && attendees.length > 0 && (
+            <div>
+              <span className="text-xs font-medium text-muted-foreground">
+                Attendees:
+              </span>{" "}
+              <span className="text-foreground">{attendees.join(", ")}</span>
+            </div>
+          )}
+        </div>
+      </CardContent>
+      {!isConfirmed && requiresConfirmation && (
+        <CardFooter className="flex items-center justify-end gap-2 border-t px-4 py-3">
+          <Button
+            size="sm"
+            onClick={handleConfirm}
+            disabled={
+              isConfirming ||
+              isProcessing ||
+              disableConfirm ||
+              !isPersistedMessage
+            }
+          >
+            {isConfirming || isProcessing ? (
+              <>
+                <Loader2 className="mr-1 size-3.5 animate-spin" />
+                Processing...
+              </>
+            ) : (
+              <>
+                <CheckIcon className="mr-1 size-3.5" />
+                Confirm
+              </>
+            )}
+          </Button>
+        </CardFooter>
+      )}
+    </Card>
+  );
+}
+
+function parseCalendarConfirmationResult(
+  result: unknown,
+): CalendarConfirmationResult | null {
+  if (typeof result !== "object" || result === null) return null;
+  const r = result as Record<string, unknown>;
+  if (typeof r.confirmedAt !== "string") return null;
+  return {
+    actionType: r.actionType as PendingCalendarActionType,
+    eventId: (r.eventId as string) ?? null,
+    eventUrl: (r.eventUrl as string) ?? null,
+    confirmedAt: r.confirmedAt,
+  };
+}
+
+function formatCalendarDateTime(isoString: string): string {
+  try {
+    const date = new Date(isoString);
+    return date.toLocaleString(undefined, {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  } catch {
+    return isoString;
+  }
+}
+
+function getCalendarActionLabel(actionType: PendingCalendarActionType): string {
+  switch (actionType) {
+    case "create_calendar_event":
+      return "Create Event";
+    case "update_calendar_event":
+      return "Reschedule Event";
+    case "cancel_calendar_event":
+      return "Cancel Event";
+  }
+}
+
+function getCalendarActionConfirmedLabel(
+  actionType: PendingCalendarActionType,
+): string {
+  switch (actionType) {
+    case "create_calendar_event":
+      return "Created";
+    case "update_calendar_event":
+      return "Updated";
+    case "cancel_calendar_event":
+      return "Cancelled";
+  }
+}
+
+function getCalendarActionSuccessMessage(
+  actionType: PendingCalendarActionType,
+): string {
+  switch (actionType) {
+    case "create_calendar_event":
+      return "Calendar event created successfully";
+    case "update_calendar_event":
+      return "Calendar event updated successfully";
+    case "cancel_calendar_event":
+      return "Calendar event cancelled successfully";
+  }
 }
 
 function EmailActionResult({

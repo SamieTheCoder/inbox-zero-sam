@@ -23,6 +23,9 @@ import {
   ReplyEmailResult,
   SearchInboxResult,
   SendEmailResult,
+  CreateCalendarEventResult,
+  UpdateCalendarEventResult,
+  CancelCalendarEventResult,
   UpdatePersonalInstructions,
   UpdatedLearnedPatterns,
   UpdatedRule,
@@ -360,6 +363,39 @@ export function MessagePart({
       messageId,
       preparingText: "Preparing forward...",
       ResultComponent: ForwardEmailResult,
+    });
+  }
+
+  if (part.type === "tool-createCalendarEvent") {
+    return renderPendingEmailAction({
+      part,
+      disableConfirm,
+      isPersistedMessage,
+      messageId,
+      preparingText: "Preparing calendar event...",
+      ResultComponent: CreateCalendarEventResult,
+    });
+  }
+
+  if (part.type === "tool-updateCalendarEvent") {
+    return renderPendingEmailAction({
+      part,
+      disableConfirm,
+      isPersistedMessage,
+      messageId,
+      preparingText: "Preparing event update...",
+      ResultComponent: UpdateCalendarEventResult,
+    });
+  }
+
+  if (part.type === "tool-cancelCalendarEvent") {
+    return renderPendingEmailAction({
+      part,
+      disableConfirm,
+      isPersistedMessage,
+      messageId,
+      preparingText: "Preparing event cancellation...",
+      ResultComponent: CancelCalendarEventResult,
     });
   }
 

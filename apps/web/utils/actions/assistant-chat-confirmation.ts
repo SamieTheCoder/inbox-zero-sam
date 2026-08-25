@@ -14,6 +14,12 @@ import {
   type AssistantEmailConfirmationResult,
   type AssistantPendingEmailActionType,
   type AssistantPendingEmailToolOutput,
+  type AssistantPendingCalendarActionType,
+  type AssistantPendingCalendarToolOutput,
+  type AssistantCalendarConfirmationResult,
+  pendingCreateCalendarEventToolOutputSchema,
+  pendingUpdateCalendarEventToolOutputSchema,
+  pendingCancelCalendarEventToolOutputSchema,
   pendingCreateRuleToolOutputSchema,
   pendingForwardEmailToolOutputSchema,
   pendingReplyEmailToolOutputSchema,
@@ -1882,4 +1888,461 @@ function getPendingActionContentPatch(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+// --- Calendar Event Confirmation ---
+
+export async function confirmAssistantCalendarActionForAccount({
+  chatId,
+  chatMessageId,
+  toolCallId,
+  actionType,
+  waitForPersistence,
+  emailAccountId,
+  logger,
+}: {
+  chatId: string;
+  chatMessageId?: string;
+  toolCallId: string;
+  actionType: AssistantPendingCalendarActionType;
+  waitForPersistence?: boolean;
+  emailAccountId: string;
+  logger: Logger;
+}) {
+  const reservation = await reservePendingAssistantCalendarAction({
+    chatId,
+    chatMessageId,
+    toolCallId,
+    actionType,
+    emailAccountId,
+    waitForPersistence,
+    logger,
+  });
+
+  if (reservation.status === "confirmed") {
+    return {
+      success: true,
+      confirmationState: "confirmed" as const,
+      actionType,
+      confirmationResult: reservation.confirmationResult,
+    };
+  }
+
+  let confirmationResult: AssistantCalendarConfirmationResult;
+  try {
+    confirmationResult = await executeAssistantCalendarAction({
+      output: reservation.output,
+      emailAccountId,
+      logger,
+    });
+  } catch (error) {
+    await clearPendingPartProcessing({
+      chatMessageId: reservation.chatMessageId,
+      emailAccountId,
+      findPart: (parts) =>
+        findPendingAssistantCalendarPart({ parts, toolCallId, actionType }),
+    }).catch((processingError) => {
+      logger.error("Failed to clear processing state for calendar action", {
+        error: processingError,
+        actionType,
+      });
+    });
+
+    logger.error("Failed to confirm assistant calendar action", {
+      error,
+      actionType,
+    });
+    throw new SafeError(
+      error instanceof SafeError
+        ? error.message
+        : `Failed to ${actionType.replace("_calendar_event", "").replace("_", " ")} calendar event`,
+    );
+  }
+
+  try {
+    await persistConfirmedAssistantCalendarPart({
+      chatMessageId: reservation.chatMessageId,
+      emailAccountId,
+      toolCallId,
+      actionType,
+      confirmationResult,
+      logger,
+    });
+  } catch (error) {
+    logger.error("Failed to persist confirmed assistant calendar action", {
+      error,
+      actionType,
+    });
+    throw new SafeError(
+      "Calendar action was executed but confirmation state could not be saved. Please refresh.",
+    );
+  }
+
+  return {
+    success: true,
+    confirmationState: "confirmed" as const,
+    actionType,
+    confirmationResult,
+  };
+}
+
+async function executeAssistantCalendarAction({
+  output,
+  emailAccountId,
+  logger,
+}: {
+  output: AssistantPendingCalendarToolOutput;
+  emailAccountId: string;
+  logger: Logger;
+}): Promise<AssistantCalendarConfirmationResult> {
+  const confirmedAt = new Date().toISOString();
+
+  switch (output.actionType) {
+    case "create_calendar_event": {
+      const { createCalendarEvent } = await import(
+        "@/utils/calendar/event-writer"
+      );
+      const result = await createCalendarEvent({
+        emailAccountId,
+        title: output.pendingAction.title,
+        startTime: new Date(output.pendingAction.startTime),
+        endTime: new Date(output.pendingAction.endTime),
+        timezone: output.pendingAction.timezone || "UTC",
+        attendees: (output.pendingAction.attendees || []).map((email) => ({
+          email,
+        })),
+        description: output.pendingAction.description || undefined,
+        locationType: resolveLocationType(output.pendingAction.location),
+        locationValue: output.pendingAction.location || undefined,
+        logger,
+      });
+      return {
+        actionType: "create_calendar_event",
+        eventId: result.id,
+        eventUrl: result.eventUrl ?? null,
+        confirmedAt,
+      };
+    }
+    case "update_calendar_event": {
+      const { updateCalendarEvent } = await import(
+        "@/utils/calendar/event-writer"
+      );
+      const { providerConnectionId, providerCalendarId } =
+        await getCalendarConnectionForEvent(emailAccountId);
+      await updateCalendarEvent({
+        providerConnectionId,
+        providerCalendarId,
+        providerEventId: output.pendingAction.eventId,
+        emailAccountId,
+        startTime: new Date(output.pendingAction.startTime),
+        endTime: new Date(output.pendingAction.endTime),
+        timezone: output.pendingAction.timezone || "UTC",
+        logger,
+      });
+      return {
+        actionType: "update_calendar_event",
+        eventId: output.pendingAction.eventId,
+        eventUrl: null,
+        confirmedAt,
+      };
+    }
+    case "cancel_calendar_event": {
+      const { cancelCalendarEvent } = await import(
+        "@/utils/calendar/event-writer"
+      );
+      const { providerConnectionId, providerCalendarId } =
+        await getCalendarConnectionForEvent(emailAccountId);
+      await cancelCalendarEvent({
+        providerConnectionId,
+        providerCalendarId,
+        providerEventId: output.pendingAction.eventId,
+        emailAccountId,
+        logger,
+      });
+      return {
+        actionType: "cancel_calendar_event",
+        eventId: output.pendingAction.eventId,
+        eventUrl: null,
+        confirmedAt,
+      };
+    }
+  }
+}
+
+function resolveLocationType(
+  location: string | null | undefined,
+): "GOOGLE_MEET" | "MICROSOFT_TEAMS" | "IN_PERSON" | "CUSTOM" {
+  if (!location) return "CUSTOM";
+  const lower = location.toLowerCase();
+  if (lower.includes("google meet")) return "GOOGLE_MEET";
+  if (lower.includes("teams")) return "MICROSOFT_TEAMS";
+  if (
+    lower.includes("http://") ||
+    lower.includes("https://") ||
+    lower.includes("zoom")
+  ) {
+    return "CUSTOM";
+  }
+  return "CUSTOM";
+}
+
+async function getCalendarConnectionForEvent(emailAccountId: string) {
+  const calendar = await prisma.calendar.findFirst({
+    where: {
+      isEnabled: true,
+      connection: { emailAccountId, isConnected: true },
+    },
+    orderBy: [{ primary: "desc" }, { createdAt: "asc" }],
+    select: {
+      calendarId: true,
+      connection: { select: { id: true } },
+    },
+  });
+
+  if (!calendar) {
+    throw new SafeError("No writable calendar found");
+  }
+
+  return {
+    providerConnectionId: calendar.connection.id,
+    providerCalendarId: calendar.calendarId,
+  };
+}
+
+const CALENDAR_ACTION_METADATA: Record<
+  AssistantPendingCalendarActionType,
+  {
+    toolType: string;
+    parseOutput: (output: unknown) => AssistantPendingCalendarToolOutput | null;
+  }
+> = {
+  create_calendar_event: {
+    toolType: "tool-createCalendarEvent",
+    parseOutput: (output) => {
+      const parsed =
+        pendingCreateCalendarEventToolOutputSchema.safeParse(output);
+      return parsed.success ? parsed.data : null;
+    },
+  },
+  update_calendar_event: {
+    toolType: "tool-updateCalendarEvent",
+    parseOutput: (output) => {
+      const parsed =
+        pendingUpdateCalendarEventToolOutputSchema.safeParse(output);
+      return parsed.success ? parsed.data : null;
+    },
+  },
+  cancel_calendar_event: {
+    toolType: "tool-cancelCalendarEvent",
+    parseOutput: (output) => {
+      const parsed =
+        pendingCancelCalendarEventToolOutputSchema.safeParse(output);
+      return parsed.success ? parsed.data : null;
+    },
+  },
+};
+
+function findPendingAssistantCalendarPart({
+  parts,
+  toolCallId,
+  actionType,
+}: {
+  parts: unknown;
+  toolCallId: string;
+  actionType: AssistantPendingCalendarActionType;
+}) {
+  if (!Array.isArray(parts)) return null;
+
+  const expectedToolType = CALENDAR_ACTION_METADATA[actionType].toolType;
+  for (const [index, part] of parts.entries()) {
+    if (
+      !isRecord(part) ||
+      part.type !== expectedToolType ||
+      part.toolCallId !== toolCallId
+    ) {
+      continue;
+    }
+
+    const parsedOutput = CALENDAR_ACTION_METADATA[actionType].parseOutput(
+      part.output,
+    );
+    if (!parsedOutput) return null;
+
+    return {
+      index,
+      output: parsedOutput,
+      parts: parts as unknown[],
+    };
+  }
+
+  return null;
+}
+
+async function reservePendingAssistantCalendarAction({
+  chatId,
+  chatMessageId,
+  toolCallId,
+  actionType,
+  emailAccountId,
+  waitForPersistence,
+  logger,
+}: {
+  chatId: string;
+  chatMessageId?: string;
+  toolCallId: string;
+  actionType: AssistantPendingCalendarActionType;
+  emailAccountId: string;
+  waitForPersistence?: boolean;
+  logger: Logger;
+}) {
+  const matchCalendarParts = (parts: unknown) =>
+    !!findPendingAssistantCalendarPart({ parts, toolCallId, actionType });
+  const waitForPersistenceMs = waitForPersistence
+    ? PENDING_ACTION_PERSIST_WAIT_MS
+    : undefined;
+
+  const chatMessage = await findChatMessageForPendingAction({
+    chatId,
+    chatMessageId,
+    emailAccountId,
+    logger,
+    matchParts: matchCalendarParts,
+    logPrefix: "Assistant calendar confirmation",
+    waitForPersistenceMs,
+  });
+
+  if (!chatMessage) {
+    logger.warn(
+      "Assistant calendar confirmation failed: chat message not found",
+      { chatMessageId, toolCallId, actionType },
+    );
+    throw new SafeError("Chat message not found");
+  }
+
+  const lookup = findPendingAssistantCalendarPart({
+    parts: chatMessage.parts,
+    toolCallId,
+    actionType,
+  });
+  if (!lookup) {
+    logger.warn(
+      "Assistant calendar confirmation failed: pending action not found",
+      { chatMessageId: chatMessage.id, toolCallId, actionType },
+    );
+    throw new SafeError("Pending calendar action not found");
+  }
+
+  if (
+    lookup.output.confirmationState === "confirmed" &&
+    lookup.output.confirmationResult
+  ) {
+    return {
+      status: "confirmed" as const,
+      confirmationResult: lookup.output.confirmationResult,
+    };
+  }
+
+  if (
+    lookup.output.confirmationState === "processing" &&
+    !hasProcessingLeaseExpired(lookup.output.confirmationProcessingAt)
+  ) {
+    throw new SafeError("Calendar action confirmation already in progress");
+  }
+
+  const processingAt = new Date().toISOString();
+  const processingParts = updateAssistantEmailPartWithProcessing({
+    parts: lookup.parts,
+    partIndex: lookup.index,
+    processingAt,
+  });
+
+  const claim = await prisma.chatMessage.updateMany({
+    where: {
+      id: chatMessage.id,
+      chatId: chatMessage.chatId,
+      updatedAt: chatMessage.updatedAt,
+    },
+    data: {
+      parts: processingParts as Prisma.InputJsonValue,
+    },
+  });
+
+  if (claim.count === 1) {
+    return {
+      status: "reserved" as const,
+      chatMessageId: chatMessage.id,
+      output: lookup.output,
+      parts: processingParts,
+      partIndex: lookup.index,
+    };
+  }
+
+  const latestMessage = await findChatMessageForPendingAction({
+    chatId,
+    chatMessageId,
+    emailAccountId,
+    logger,
+    matchParts: matchCalendarParts,
+    logPrefix: "Assistant calendar confirmation",
+    waitForPersistenceMs,
+  });
+
+  if (!latestMessage) {
+    throw new SafeError("Chat message not found");
+  }
+
+  const latestLookup = findPendingAssistantCalendarPart({
+    parts: latestMessage.parts,
+    toolCallId,
+    actionType,
+  });
+
+  if (
+    latestLookup?.output.confirmationState === "confirmed" &&
+    latestLookup.output.confirmationResult
+  ) {
+    return {
+      status: "confirmed" as const,
+      confirmationResult: latestLookup.output.confirmationResult,
+    };
+  }
+
+  throw new SafeError("Calendar action confirmation already in progress");
+}
+
+async function persistConfirmedAssistantCalendarPart({
+  chatMessageId,
+  emailAccountId,
+  toolCallId,
+  actionType,
+  confirmationResult,
+  logger,
+}: {
+  chatMessageId: string;
+  emailAccountId: string;
+  toolCallId: string;
+  actionType: AssistantPendingCalendarActionType;
+  confirmationResult: AssistantCalendarConfirmationResult;
+  logger: Logger;
+}) {
+  await persistConfirmedAssistantPart({
+    chatMessageId,
+    emailAccountId,
+    logger: logger.with({ chatMessageId, toolCallId, actionType }),
+    findPart: (parts) =>
+      findPendingAssistantCalendarPart({ parts, toolCallId, actionType }),
+    isConfirmed: (lookup) =>
+      lookup.output.confirmationState === "confirmed" &&
+      !!lookup.output.confirmationResult,
+    buildParts: ({ parts, partIndex }) =>
+      updateAssistantEmailPartOutput({
+        parts,
+        partIndex,
+        outputPatch: {
+          success: true,
+          confirmationState: "confirmed",
+          confirmationResult,
+        },
+      }),
+  });
 }

@@ -4,9 +4,11 @@ import { actionClient } from "@/utils/actions/safe-action";
 import {
   confirmAssistantCreateRuleBody,
   confirmAssistantEmailActionBody,
+  confirmAssistantCalendarActionBody,
   confirmAssistantSaveMemoryBody,
 } from "./assistant-chat.validation";
 import {
+  confirmAssistantCalendarActionForAccount,
   confirmAssistantCreateRuleForAccount,
   confirmAssistantEmailActionForAccount,
   confirmAssistantSaveMemoryForAccount,
@@ -70,6 +72,25 @@ export const confirmAssistantSaveMemory = actionClient
         chatId,
         chatMessageId,
         toolCallId,
+        waitForPersistence: true,
+        emailAccountId,
+        logger,
+      }),
+  );
+
+export const confirmAssistantCalendarAction = actionClient
+  .metadata({ name: "confirmAssistantCalendarAction" })
+  .inputSchema(confirmAssistantCalendarActionBody)
+  .action(
+    async ({
+      ctx: { emailAccountId, logger },
+      parsedInput: { chatId, chatMessageId, toolCallId, actionType },
+    }) =>
+      confirmAssistantCalendarActionForAccount({
+        chatId,
+        chatMessageId,
+        toolCallId,
+        actionType,
         waitForPersistence: true,
         emailAccountId,
         logger,

@@ -206,3 +206,93 @@ export const assistantInputSchema = z.object({
 });
 
 export type AssistantInput = z.infer<typeof assistantInputSchema>;
+
+// --- Calendar Event Action Schemas ---
+
+export const assistantPendingCalendarActionTypeSchema = z.enum([
+  "create_calendar_event",
+  "update_calendar_event",
+  "cancel_calendar_event",
+]);
+export type AssistantPendingCalendarActionType = z.infer<
+  typeof assistantPendingCalendarActionTypeSchema
+>;
+
+const calendarConfirmationResultSchema = z.object({
+  actionType: assistantPendingCalendarActionTypeSchema,
+  eventId: z.string().nullish(),
+  eventUrl: z.string().nullish(),
+  confirmedAt: z.string().min(1),
+});
+export type AssistantCalendarConfirmationResult = z.infer<
+  typeof calendarConfirmationResultSchema
+>;
+
+export const pendingCreateCalendarEventToolOutputSchema = z.object({
+  success: z.boolean().optional(),
+  actionType: z.literal("create_calendar_event"),
+  requiresConfirmation: z.literal(true),
+  confirmationState: z.enum(["pending", "processing", "confirmed"]),
+  confirmationProcessingAt: z.string().optional(),
+  pendingAction: z.object({
+    title: z.string().trim().min(1),
+    startTime: z.string().min(1),
+    endTime: z.string().min(1),
+    description: z.string().nullish(),
+    attendees: z.array(z.string()).optional(),
+    location: z.string().nullish(),
+    timezone: z.string().optional(),
+  }),
+  confirmationResult: calendarConfirmationResultSchema.optional(),
+});
+export type PendingCreateCalendarEventToolOutput = z.infer<
+  typeof pendingCreateCalendarEventToolOutputSchema
+>;
+
+export const pendingUpdateCalendarEventToolOutputSchema = z.object({
+  success: z.boolean().optional(),
+  actionType: z.literal("update_calendar_event"),
+  requiresConfirmation: z.literal(true),
+  confirmationState: z.enum(["pending", "processing", "confirmed"]),
+  confirmationProcessingAt: z.string().optional(),
+  pendingAction: z.object({
+    eventId: z.string().trim().min(1),
+    title: z.string().trim().min(1),
+    startTime: z.string().min(1),
+    endTime: z.string().min(1),
+    timezone: z.string().optional(),
+  }),
+  confirmationResult: calendarConfirmationResultSchema.optional(),
+});
+export type PendingUpdateCalendarEventToolOutput = z.infer<
+  typeof pendingUpdateCalendarEventToolOutputSchema
+>;
+
+export const pendingCancelCalendarEventToolOutputSchema = z.object({
+  success: z.boolean().optional(),
+  actionType: z.literal("cancel_calendar_event"),
+  requiresConfirmation: z.literal(true),
+  confirmationState: z.enum(["pending", "processing", "confirmed"]),
+  confirmationProcessingAt: z.string().optional(),
+  pendingAction: z.object({
+    eventId: z.string().trim().min(1),
+    title: z.string().trim().min(1),
+  }),
+  confirmationResult: calendarConfirmationResultSchema.optional(),
+});
+export type PendingCancelCalendarEventToolOutput = z.infer<
+  typeof pendingCancelCalendarEventToolOutputSchema
+>;
+
+export type AssistantPendingCalendarToolOutput =
+  | PendingCreateCalendarEventToolOutput
+  | PendingUpdateCalendarEventToolOutput
+  | PendingCancelCalendarEventToolOutput;
+
+export const confirmAssistantCalendarActionBody =
+  confirmAssistantActionBaseBody.extend({
+    actionType: assistantPendingCalendarActionTypeSchema,
+  });
+export type ConfirmAssistantCalendarActionBody = z.infer<
+  typeof confirmAssistantCalendarActionBody
+>;
