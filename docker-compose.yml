@@ -59,6 +59,7 @@ services:
 
   web:
     image: ghcr.io/samiethecoder/inbox-zero-sam:latest
+    platform: linux/amd64
     pull_policy: always
     build:
       context: .
@@ -90,6 +91,7 @@ services:
 
   worker:
     image: ghcr.io/samiethecoder/inbox-zero-sam:latest
+    platform: linux/amd64
     pull_policy: always
     build:
       context: .
