@@ -58,7 +58,7 @@ services:
       - all
 
   web:
-    image: ghcr.io/elie222/inbox-zero:latest
+    image: ghcr.io/samiethecoder/inbox-zero-sam:latest
     pull_policy: always
     build:
       context: .
@@ -89,7 +89,7 @@ services:
     restart: always
 
   worker:
-    image: ghcr.io/elie222/inbox-zero:latest
+    image: ghcr.io/samiethecoder/inbox-zero-sam:latest
     pull_policy: always
     build:
       context: .

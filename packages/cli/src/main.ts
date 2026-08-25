@@ -118,6 +118,14 @@ function fixComposeEnvPaths(composeContent: string): string {
     .replace(/- .\/apps\/web\/.env/g, "- ./.env");
 }
 
+// Replace the upstream Docker image reference with our custom image
+function replaceDockerImage(composeContent: string): string {
+  return composeContent.replace(
+    /image:\s*ghcr\.io\/elie222\/inbox-zero:latest/g,
+    `image: ${CUSTOM_DOCKER_IMAGE}`,
+  );
+}
+
 function findEnvFile(name?: string): string | null {
   const envFileName = getEnvFileName(name);
 
@@ -180,7 +188,7 @@ async function main() {
     )
     .option(
       "--local",
-      "Rebuild the Docker image from local source instead of pulling from the registry (requires running from within the cloned repo)",
+      "Rebuild the Docker image from source instead of pulling from the registry (auto-clones the repo if needed)",
     )
     .action(runUpdate);
 
@@ -656,6 +664,7 @@ async function runSetupQuick(options: { name?: string }) {
     try {
       let composeContent = await fetchDockerCompose();
       composeContent = fixComposeEnvPaths(composeContent);
+      composeContent = replaceDockerImage(composeContent);
       writeFileSync(composeFile, composeContent);
     } catch {
       spinner.stop("Failed to download Docker setup");
@@ -1189,6 +1198,7 @@ Full guide: https://docs.getinboxzero.com/self-hosting/microsoft-oauth`,
     try {
       composeContent = await fetchDockerCompose();
       composeContent = fixComposeEnvPaths(composeContent);
+      composeContent = replaceDockerImage(composeContent);
     } catch {
       spinner.stop("Failed to fetch docker-compose.yml");
       p.log.error(
@@ -1502,14 +1512,6 @@ async function runStatus() {
 async function runUpdate(options: { local?: boolean }) {
   requireDocker();
 
-  if (options.local && !REPO_ROOT) {
-    p.log.error(
-      "Local rebuild requires running from within a cloned Inbox Zero repository.\n" +
-        "Clone it with 'git clone https://github.com/elie222/inbox-zero.git', cd in, then retry.",
-    );
-    process.exit(1);
-  }
-
   const composeFile = REPO_ROOT
     ? resolve(REPO_ROOT, "docker-compose.yml")
     : STANDALONE_COMPOSE_FILE;
@@ -1517,6 +1519,12 @@ async function runUpdate(options: { local?: boolean }) {
   if (!existsSync(composeFile)) {
     p.log.error("Inbox Zero is not configured.");
     process.exit(1);
+  }
+
+  // For --local builds, determine the source directory
+  let localSourceDir: string | null = null;
+  if (options.local) {
+    localSourceDir = REPO_ROOT ?? resolve(STANDALONE_CONFIG_DIR, "source");
   }
 
   const composeArgs = ["compose", "-f", composeFile];
@@ -1529,16 +1537,72 @@ async function runUpdate(options: { local?: boolean }) {
 
   const spinner = p.spinner();
 
-  if (options.local) {
+  if (options.local && localSourceDir) {
+    // If not in a repo, clone or pull the source into ~/.inbox-zero/source/
+    if (!REPO_ROOT) {
+      spinner.start("Preparing local source...");
+
+      if (existsSync(resolve(localSourceDir, "apps/web"))) {
+        // Source already cloned — pull latest
+        const pullResult = spawnSync("git", ["pull", "--ff-only"], {
+          cwd: localSourceDir,
+          stdio: "pipe",
+        });
+        if (pullResult.status !== 0) {
+          // If ff-only fails, try a reset to origin/main
+          spawnSync("git", ["fetch", "origin"], {
+            cwd: localSourceDir,
+            stdio: "pipe",
+          });
+          spawnSync("git", ["reset", "--hard", "origin/main"], {
+            cwd: localSourceDir,
+            stdio: "pipe",
+          });
+        }
+        spinner.stop("Source updated");
+      } else {
+        // Clone fresh
+        mkdirSync(localSourceDir, { recursive: true });
+        const cloneResult = spawnSync(
+          "git",
+          [
+            "clone",
+            "--depth",
+            "1",
+            "https://github.com/SamieTheCoder/inbox-zero-sam.git",
+            localSourceDir,
+          ],
+          { stdio: "pipe" },
+        );
+        if (cloneResult.status !== 0) {
+          spinner.stop("Failed to clone repository");
+          p.log.error(
+            "Could not clone the Inbox Zero repository.\n" +
+              "Check your internet connection and that git is installed.",
+          );
+          process.exit(1);
+        }
+        spinner.stop("Source cloned");
+      }
+    }
+
     spinner.start(
       "Building image from local source (this can take a few minutes)...",
     );
 
-    const buildResult = await runDockerCommand([
-      ...composeArgs,
-      "build",
-      "web",
-    ]);
+    // Build from the source directory using its docker-compose.yml
+    const sourceComposeFile = resolve(localSourceDir, "docker-compose.yml");
+    if (!existsSync(sourceComposeFile)) {
+      spinner.stop("Failed to build");
+      p.log.error(
+        "docker-compose.yml not found in source directory.\n" +
+          `Expected at: ${sourceComposeFile}`,
+      );
+      process.exit(1);
+    }
+
+    const buildArgs = ["compose", "-f", sourceComposeFile, "build", "web"];
+    const buildResult = await runDockerCommand(buildArgs);
 
     if (buildResult.status !== 0) {
       spinner.stop("Failed to build");
@@ -1548,6 +1612,14 @@ async function runUpdate(options: { local?: boolean }) {
 
     spinner.stop("Image built");
   } else {
+    // Ensure the compose file references our custom image
+    if (existsSync(composeFile)) {
+      const currentCompose = readFileSync(composeFile, "utf-8");
+      if (currentCompose.includes("ghcr.io/elie222/inbox-zero")) {
+        writeFileSync(composeFile, replaceDockerImage(currentCompose));
+      }
+    }
+
     spinner.start("Pulling latest image...");
 
     const pullResult = await runDockerCommand([...composeArgs, "pull"]);
@@ -1811,7 +1883,9 @@ function cancelSetup(): never {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const COMPOSE_URL =
-  "https://raw.githubusercontent.com/elie222/inbox-zero/main/docker-compose.yml";
+  "https://raw.githubusercontent.com/SamieTheCoder/inbox-zero-sam/main/docker-compose.yml";
+
+const CUSTOM_DOCKER_IMAGE = "ghcr.io/samiethecoder/inbox-zero-sam:latest";
 
 async function fetchDockerCompose(): Promise<string> {
   const response = await fetch(COMPOSE_URL);
