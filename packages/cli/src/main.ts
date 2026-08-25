@@ -175,7 +175,13 @@ async function main() {
 
   program
     .command("update")
-    .description("Update to the latest version")
+    .description(
+      "Update to the latest version (use --local to rebuild from local source)",
+    )
+    .option(
+      "--local",
+      "Rebuild the Docker image from local source instead of pulling from the registry (requires running from within the cloned repo)",
+    )
     .action(runUpdate);
 
   const configCmd = program
@@ -775,7 +781,8 @@ async function runSetupQuick(options: { name?: string }) {
       "  inbox-zero config    — update settings (e.g. add Pub/Sub token)\n" +
       "  inbox-zero logs -f   — view live logs\n" +
       "  inbox-zero stop      — stop the app\n" +
-      "  inbox-zero update    — update to latest version",
+      "  inbox-zero update    — update to latest version\n" +
+      "  inbox-zero update --local — rebuild from local source changes",
     "You're all set!",
   );
 
@@ -1492,33 +1499,67 @@ async function runStatus() {
 // Update Command
 // ═══════════════════════════════════════════════════════════════════════════
 
-async function runUpdate() {
+async function runUpdate(options: { local?: boolean }) {
   requireDocker();
 
-  if (!existsSync(STANDALONE_COMPOSE_FILE)) {
+  if (options.local && !REPO_ROOT) {
+    p.log.error(
+      "Local rebuild requires running from within a cloned Inbox Zero repository.\n" +
+        "Clone it with 'git clone https://github.com/elie222/inbox-zero.git', cd in, then retry.",
+    );
+    process.exit(1);
+  }
+
+  const composeFile = REPO_ROOT
+    ? resolve(REPO_ROOT, "docker-compose.yml")
+    : STANDALONE_COMPOSE_FILE;
+
+  if (!existsSync(composeFile)) {
     p.log.error("Inbox Zero is not configured.");
     process.exit(1);
   }
 
-  p.intro("Updating Inbox Zero");
+  const composeArgs = ["compose", "-f", composeFile];
+
+  p.intro(
+    options.local
+      ? "Rebuilding Inbox Zero from local source"
+      : "Updating Inbox Zero",
+  );
 
   const spinner = p.spinner();
-  spinner.start("Pulling latest image...");
 
-  const pullResult = await runDockerCommand([
-    "compose",
-    "-f",
-    STANDALONE_COMPOSE_FILE,
-    "pull",
-  ]);
+  if (options.local) {
+    spinner.start(
+      "Building image from local source (this can take a few minutes)...",
+    );
 
-  if (pullResult.status !== 0) {
-    spinner.stop("Failed to pull");
-    p.log.error(pullResult.stderr || "Unknown error");
-    process.exit(1);
+    const buildResult = await runDockerCommand([
+      ...composeArgs,
+      "build",
+      "web",
+    ]);
+
+    if (buildResult.status !== 0) {
+      spinner.stop("Failed to build");
+      p.log.error(buildResult.stderr || "Unknown error");
+      process.exit(1);
+    }
+
+    spinner.stop("Image built");
+  } else {
+    spinner.start("Pulling latest image...");
+
+    const pullResult = await runDockerCommand([...composeArgs, "pull"]);
+
+    if (pullResult.status !== 0) {
+      spinner.stop("Failed to pull");
+      p.log.error(pullResult.stderr || "Unknown error");
+      process.exit(1);
+    }
+
+    spinner.stop("Image updated");
   }
-
-  spinner.stop("Image updated");
 
   const restart = await p.confirm({
     message: "Restart with new image?",
@@ -1533,16 +1574,10 @@ async function runUpdate() {
   if (restart) {
     spinner.start("Restarting...");
 
-    await runDockerCommand(["compose", "-f", STANDALONE_COMPOSE_FILE, "down"]);
-    const upResult = await runDockerCommand([
-      "compose",
-      "-f",
-      STANDALONE_COMPOSE_FILE,
-      "--profile",
-      "all",
-      "up",
-      "-d",
-    ]);
+    await runDockerCommand([...composeArgs, "down"]);
+    const upArgs = [...composeArgs, "--profile", "all", "up", "-d"];
+    if (options.local) upArgs.push("--pull", "never");
+    const upResult = await runDockerCommand(upArgs);
 
     if (upResult.status !== 0) {
       const portError = parsePortConflict(upResult.stderr);

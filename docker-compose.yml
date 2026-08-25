@@ -60,6 +60,9 @@ services:
   web:
     image: ghcr.io/elie222/inbox-zero:latest
     pull_policy: always
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.prod
     env_file:
       - path: ./apps/web/.env
         required: false
@@ -88,6 +91,9 @@ services:
   worker:
     image: ghcr.io/elie222/inbox-zero:latest
     pull_policy: always
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.prod
     command: ["/app/docker/scripts/start-worker.sh"]
     env_file:
       - path: ./apps/web/.env
