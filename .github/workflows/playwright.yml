@@ -51,8 +51,6 @@ on:
       - "pnpm-lock.yaml"
       - "scripts/pnpm-install-without-desktop.sh"
       - ".github/workflows/playwright.yml"
-  schedule:
-    - cron: "0 6 * * *"
   workflow_dispatch:
 
 permissions:
