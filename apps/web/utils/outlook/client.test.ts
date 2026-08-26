@@ -90,7 +90,8 @@ describe("outlook client emulator configuration", () => {
 
     const clientOptions = vi.mocked(Client.initWithMiddleware).mock
       .calls[0]?.[0];
-    const rewriteMiddleware = clientOptions?.middleware?.[1];
+    const middlewareArray = clientOptions?.middleware as Middleware[];
+    const rewriteMiddleware = middlewareArray?.[1];
     const executeNext = vi.fn();
     const nextMiddleware: Middleware = { execute: executeNext };
     const context: Context = {
@@ -116,11 +117,16 @@ describe("outlook client emulator configuration", () => {
     expect(url.searchParams.get("redirect_uri")).toBe(
       "http://localhost:3000/api/outlook/linking/callback",
     );
-    expect(url.searchParams.get("prompt")).toBe("consent");
+    expect(url.searchParams.get("prompt")).toBe("select_account");
     expect(url.searchParams.get("scope")).toBe(
       "openid profile email User.Read offline_access Mail.ReadWrite MailboxSettings.ReadWrite",
     );
     expect(getMicrosoftOauthAuthorizeUrl).toHaveBeenCalledWith();
+  });
+
+  it("uses prompt=consent when explicitly requested", () => {
+    const url = new URL(getLinkingOAuth2Url("consent"));
+    expect(url.searchParams.get("prompt")).toBe("consent");
   });
 
   it("saves refreshed Outlook tokens with optimistic concurrency", async () => {

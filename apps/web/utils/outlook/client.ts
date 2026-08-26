@@ -294,7 +294,9 @@ export const getAccessTokenFromClient = (client: OutlookClient): string =>
   client.getAccessToken();
 
 // Helper function to get the OAuth2 URL for linking accounts
-export function getLinkingOAuth2Url() {
+export function getLinkingOAuth2Url(
+  prompt: "select_account" | "consent" = "select_account",
+) {
   if (!env.MICROSOFT_CLIENT_ID) {
     throw new Error("Microsoft login not enabled - missing client ID");
   }
@@ -304,8 +306,10 @@ export function getLinkingOAuth2Url() {
     response_type: "code",
     redirect_uri: `${env.NEXT_PUBLIC_BASE_URL}/api/outlook/linking/callback`,
     scope: SCOPES.join(" "),
-    // we can't use select_account because we need a new refresh token if the users is stale
-    prompt: "consent",
+    // select_account: lets users pick their account without forcing consent
+    // (works when org admin has already granted consent)
+    // consent: forces the consent screen for orgs that haven't consented yet
+    prompt,
   });
 
   return `${getMicrosoftOauthAuthorizeUrl()}?${params.toString()}`;

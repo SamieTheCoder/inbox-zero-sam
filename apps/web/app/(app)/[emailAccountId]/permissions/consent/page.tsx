@@ -21,7 +21,9 @@ export default function PermissionsConsentPage() {
 
     try {
       const accountProvider = provider === "microsoft" ? "microsoft" : "google";
-      const url = await getAccountLinkingUrl(accountProvider);
+      const url = await getAccountLinkingUrl(accountProvider, {
+        forceConsent: isMicrosoft,
+      });
       redirectToSafeUrl(url, { allowExternal: true });
     } catch {
       toastError({

@@ -13,11 +13,17 @@ import {
 
 export type GetOutlookAuthLinkUrlResponse = { url: string };
 
-const getAuthUrl = ({ userId }: { userId: string }) => {
+const getAuthUrl = ({
+  userId,
+  prompt,
+}: {
+  userId: string;
+  prompt?: "select_account" | "consent";
+}) => {
   const stateNonce = randomUUID();
   const state = generateSignedOAuthState({ userId, nonce: stateNonce });
 
-  const baseUrl = getLinkingOAuth2Url();
+  const baseUrl = getLinkingOAuth2Url(prompt);
   const url = `${baseUrl}&state=${state}`;
 
   return { url, state, stateNonce };
@@ -37,7 +43,17 @@ export const GET = withAuth("outlook/linking/auth-url", async (request) => {
     );
   }
 
-  const { url: authUrl, state, stateNonce } = getAuthUrl({ userId });
+  const {
+    url: authUrl,
+    state,
+    stateNonce,
+  } = getAuthUrl({
+    userId,
+    prompt:
+      request.nextUrl.searchParams.get("prompt") === "consent"
+        ? "consent"
+        : "select_account",
+  });
   const parsedAuthUrl = new URL(authUrl);
   const logger = createOAuthLinkingAuditLogger({
     actorUserId: userId,
