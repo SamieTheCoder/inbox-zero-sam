@@ -237,15 +237,23 @@ function mockBookingConfig() {
     },
   ]);
 
-  prisma.calendar.findFirst.mockResolvedValue({
-    calendarId: "primary",
-    connection: {
-      id: "connection-id",
-      provider: "google",
-      accessToken: "emulator-token",
-      refreshToken: "refresh-token",
-      expiresAt: new Date("2030-01-01T00:00:00.000Z"),
+  prisma.calendar.findMany.mockResolvedValue([
+    {
+      calendarId: "primary",
+      primary: true,
+      connection: {
+        id: "connection-id",
+        email: EMAIL,
+        provider: "google",
+        accessToken: "emulator-token",
+        refreshToken: "refresh-token",
+        expiresAt: new Date("2030-01-01T00:00:00.000Z"),
+      },
     },
+  ]);
+
+  prisma.emailAccount.findUniqueOrThrow.mockResolvedValue({
+    email: EMAIL,
   });
 }
 
