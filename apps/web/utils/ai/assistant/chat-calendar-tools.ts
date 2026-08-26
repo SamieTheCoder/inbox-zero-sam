@@ -141,10 +141,12 @@ const createCalendarEventInputSchema = z.object({
 export const createCalendarEventTool = ({
   email,
   emailAccountId,
+  userTimezone,
   logger,
 }: {
   email: string;
   emailAccountId: string;
+  userTimezone: string;
   logger: Logger;
 }) =>
   tool({
@@ -179,7 +181,7 @@ export const createCalendarEventTool = ({
             description: input.description ?? null,
             attendees: input.attendees ?? [],
             location: input.location ?? null,
-            timezone: input.timezone ?? "UTC",
+            timezone: input.timezone ?? userTimezone,
           },
         };
       } catch (error) {
@@ -223,10 +225,12 @@ const updateCalendarEventInputSchema = z.object({
 export const updateCalendarEventTool = ({
   email,
   emailAccountId,
+  userTimezone,
   logger,
 }: {
   email: string;
   emailAccountId: string;
+  userTimezone: string;
   logger: Logger;
 }) =>
   tool({
@@ -259,7 +263,7 @@ export const updateCalendarEventTool = ({
             title: input.title,
             startTime: input.startTime,
             endTime: input.endTime,
-            timezone: input.timezone ?? "UTC",
+            timezone: input.timezone ?? userTimezone,
           },
         };
       } catch (error) {

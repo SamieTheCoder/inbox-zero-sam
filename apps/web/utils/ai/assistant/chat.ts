@@ -143,6 +143,7 @@ export async function aiProcessAssistantChat({
     email: user.email,
     emailAccountId,
     userId: user.userId,
+    userTimezone,
     provider: user.account.provider,
     integrationActionsEnabled,
     logger,

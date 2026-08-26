@@ -44,19 +44,26 @@ describe("createCalendarEvent", () => {
       id: "provider-event-id",
       providerCalendarId: "primary",
     });
+    prisma.emailAccount.findUniqueOrThrow.mockResolvedValue({
+      email: "user@example.com",
+    });
   });
 
   it("passes the connection id into the Google event provider", async () => {
-    prisma.calendar.findFirst.mockResolvedValue({
-      calendarId: "primary",
-      connection: {
-        id: "connection-id",
-        provider: "google",
-        accessToken: "access-token",
-        refreshToken: "refresh-token",
-        expiresAt: new Date("2026-05-04T00:00:00.000Z"),
+    prisma.calendar.findMany.mockResolvedValue([
+      {
+        calendarId: "primary",
+        primary: true,
+        connection: {
+          id: "connection-id",
+          email: "user@example.com",
+          provider: "google",
+          accessToken: "access-token",
+          refreshToken: "refresh-token",
+          expiresAt: new Date("2026-05-04T00:00:00.000Z"),
+        },
       },
-    });
+    ]);
 
     const result = await createCalendarEvent({
       attendees: [{ name: "Guest User", email: "guest@example.com" }],
@@ -93,20 +100,70 @@ describe("createCalendarEvent", () => {
     });
   });
 
-  it("falls back to any enabled calendar when no destination is set and no primary exists", async () => {
-    // Microsoft accounts synced before primary tracking have no primary
-    // calendar row; booking links without an explicit destination must still
-    // find a writable calendar.
-    prisma.calendar.findFirst.mockResolvedValue({
-      calendarId: "microsoft-calendar",
-      connection: {
-        id: "connection-id",
-        provider: "microsoft",
-        accessToken: "access-token",
-        refreshToken: "refresh-token",
-        expiresAt: new Date("2026-05-04T00:00:00.000Z"),
+  it("prefers the user's own calendar connection over a linked external one", async () => {
+    prisma.calendar.findMany.mockResolvedValue([
+      {
+        calendarId: "external-primary",
+        primary: true,
+        connection: {
+          id: "external-connection-id",
+          email: "other@trackyfy.in.net",
+          provider: "google",
+          accessToken: "ext-access-token",
+          refreshToken: "ext-refresh-token",
+          expiresAt: new Date("2026-05-04T00:00:00.000Z"),
+        },
       },
+      {
+        calendarId: "own-primary",
+        primary: true,
+        connection: {
+          id: "own-connection-id",
+          email: "user@example.com",
+          provider: "google",
+          accessToken: "own-access-token",
+          refreshToken: "own-refresh-token",
+          expiresAt: new Date("2026-05-04T00:00:00.000Z"),
+        },
+      },
+    ]);
+
+    const result = await createCalendarEvent({
+      attendees: [],
+      emailAccountId: "email-account-id",
+      endTime: new Date("2026-05-04T09:30:00.000Z"),
+      locationType: "CUSTOM",
+      logger: createTestLogger(),
+      startTime: new Date("2026-05-04T09:00:00.000Z"),
+      timezone: "UTC",
+      title: "My event",
     });
+
+    expect(providerMocks.googleConstructor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        connectionId: "own-connection-id",
+      }),
+    );
+    expect(result).toMatchObject({
+      providerConnectionId: "own-connection-id",
+    });
+  });
+
+  it("falls back to any enabled calendar when no destination is set and no primary exists", async () => {
+    prisma.calendar.findMany.mockResolvedValue([
+      {
+        calendarId: "microsoft-calendar",
+        primary: false,
+        connection: {
+          id: "connection-id",
+          email: "user@example.com",
+          provider: "microsoft",
+          accessToken: "access-token",
+          refreshToken: "refresh-token",
+          expiresAt: new Date("2026-05-04T00:00:00.000Z"),
+        },
+      },
+    ]);
 
     const result = await createCalendarEvent({
       attendees: [{ name: "Guest User", email: "guest@example.com" }],
@@ -120,7 +177,7 @@ describe("createCalendarEvent", () => {
       title: "Intro call",
     });
 
-    expect(prisma.calendar.findFirst).toHaveBeenCalledWith(
+    expect(prisma.calendar.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
           isEnabled: true,
@@ -213,16 +270,20 @@ describe("createCalendarEvent", () => {
   });
 
   it("uses the Microsoft event provider for Microsoft connections", async () => {
-    prisma.calendar.findFirst.mockResolvedValue({
-      calendarId: "microsoft-calendar",
-      connection: {
-        id: "connection-id",
-        provider: "microsoft",
-        accessToken: "access-token",
-        refreshToken: "refresh-token",
-        expiresAt: new Date("2026-05-04T00:00:00.000Z"),
+    prisma.calendar.findMany.mockResolvedValue([
+      {
+        calendarId: "microsoft-calendar",
+        primary: true,
+        connection: {
+          id: "connection-id",
+          email: "user@example.com",
+          provider: "microsoft",
+          accessToken: "access-token",
+          refreshToken: "refresh-token",
+          expiresAt: new Date("2026-05-04T00:00:00.000Z"),
+        },
       },
-    });
+    ]);
 
     await createCalendarEvent({
       attendees: [{ name: "Guest User", email: "guest@example.com" }],
@@ -253,16 +314,20 @@ describe("createCalendarEvent", () => {
   });
 
   it("normalizes stale provider video locations to the writable calendar provider", async () => {
-    prisma.calendar.findFirst.mockResolvedValue({
-      calendarId: "microsoft-calendar",
-      connection: {
-        id: "connection-id",
-        provider: "microsoft",
-        accessToken: "access-token",
-        refreshToken: "refresh-token",
-        expiresAt: new Date("2026-05-04T00:00:00.000Z"),
+    prisma.calendar.findMany.mockResolvedValue([
+      {
+        calendarId: "microsoft-calendar",
+        primary: true,
+        connection: {
+          id: "connection-id",
+          email: "user@example.com",
+          provider: "microsoft",
+          accessToken: "access-token",
+          refreshToken: "refresh-token",
+          expiresAt: new Date("2026-05-04T00:00:00.000Z"),
+        },
       },
-    });
+    ]);
 
     await createCalendarEvent({
       attendees: [{ name: "Guest User", email: "guest@example.com" }],
@@ -285,16 +350,20 @@ describe("createCalendarEvent", () => {
   });
 
   it("rejects unsupported writable calendar providers", async () => {
-    prisma.calendar.findFirst.mockResolvedValue({
-      calendarId: "calendar-id",
-      connection: {
-        id: "connection-id",
-        provider: "unsupported",
-        accessToken: "access-token",
-        refreshToken: "refresh-token",
-        expiresAt: null,
+    prisma.calendar.findMany.mockResolvedValue([
+      {
+        calendarId: "calendar-id",
+        primary: true,
+        connection: {
+          id: "connection-id",
+          email: "user@example.com",
+          provider: "unsupported",
+          accessToken: "access-token",
+          refreshToken: "refresh-token",
+          expiresAt: null,
+        },
       },
-    });
+    ]);
 
     await expect(
       createCalendarEvent({
