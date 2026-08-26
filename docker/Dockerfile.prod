@@ -155,6 +155,13 @@ ENV NODE_PATH=/usr/local/lib/node_modules
 
 EXPOSE 3000
 
+# Docker defaults HOSTNAME to the container ID, and the Next.js standalone server
+# binds to `process.env.HOSTNAME || '0.0.0.0'`. Leaving it unset makes the server
+# bind to the container ID, which then appears as the host in absolute redirect
+# URLs (e.g. the OAuth callback redirect), so browsers fail to resolve it with
+# DNS_PROBE_FINISHED_NXDOMAIN. Pin it to all interfaces.
+ENV HOSTNAME=0.0.0.0
+
 # Default command runs the Next.js server from the standalone bundle
 CMD ["/app/docker/scripts/start.sh"]
 # Cache bust Fri Nov 21 17:08:13 IST 2025

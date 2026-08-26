@@ -211,6 +211,9 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   async redirects() {
     return [
+      // better-auth only prefixes cookies with `__Secure-` when the base URL is
+      // https, so self-hosted http deployments carry the unprefixed names. Each
+      // `has` block is AND-ed, so the variants need separate rules to act as OR.
       {
         destination: "/automation",
         has: [
@@ -223,10 +226,32 @@ const nextConfig: NextConfig = {
         source: "/",
       },
       {
+        destination: "/automation",
+        has: [
+          {
+            key: "better-auth.session_token",
+            type: "cookie",
+          },
+        ],
+        permanent: false,
+        source: "/",
+      },
+      {
         destination: "/setup",
         has: [
           {
             key: "__Secure-better-auth.session-token.1",
+            type: "cookie",
+          },
+        ],
+        permanent: false,
+        source: "/",
+      },
+      {
+        destination: "/setup",
+        has: [
+          {
+            key: "better-auth.session-token.1",
             type: "cookie",
           },
         ],

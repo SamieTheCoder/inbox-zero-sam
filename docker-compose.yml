@@ -78,6 +78,10 @@ services:
     networks:
       - inbox-zero-network
     environment:
+      # Docker sets HOSTNAME to the container ID and Next.js standalone binds to it,
+      # which leaks the container ID into absolute redirect URLs (breaks OAuth login
+      # with DNS_PROBE_FINISHED_NXDOMAIN). Bind to all interfaces instead.
+      HOSTNAME: 0.0.0.0
       NEXT_PUBLIC_BASE_URL: ${NEXT_PUBLIC_BASE_URL:-http://localhost:3000}
       NEXT_PUBLIC_BYPASS_PREMIUM_CHECKS: ${NEXT_PUBLIC_BYPASS_PREMIUM_CHECKS:-true}
       NEXT_PUBLIC_EMAIL_SEND_ENABLED: ${NEXT_PUBLIC_EMAIL_SEND_ENABLED:-true}
