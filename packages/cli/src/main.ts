@@ -1346,17 +1346,18 @@ async function runStart(options: { detach: boolean }) {
   }
 
   const spinner = p.spinner();
-  spinner.start("Pulling latest image...");
+  p.log.step(
+    "Pulling latest image... (several hundred MB on first run, this can take a few minutes)",
+  );
 
-  const pullResult = await runDockerCommand([...composeArgs, "pull"]);
+  const pullResult = await runDockerCommandStreaming([...composeArgs, "pull"]);
 
   if (pullResult.status !== 0) {
-    spinner.stop("Failed to pull image");
-    p.log.error(pullResult.stderr || "Unknown error");
+    p.log.error("Failed to pull image. See the Docker output above.");
     process.exit(1);
   }
 
-  spinner.stop("Image pulled");
+  p.log.success("Image pulled");
 
   if (options.detach) {
     spinner.start("Starting containers...");
@@ -1602,15 +1603,15 @@ async function runUpdate(options: { local?: boolean }) {
     }
 
     const buildArgs = ["compose", "-f", sourceComposeFile, "build", "web"];
-    const buildResult = await runDockerCommand(buildArgs);
+    spinner.stop("Building image from source (this takes several minutes)");
+    const buildResult = await runDockerCommandStreaming(buildArgs);
 
     if (buildResult.status !== 0) {
-      spinner.stop("Failed to build");
-      p.log.error(buildResult.stderr || "Unknown error");
+      p.log.error("Failed to build. See the Docker output above.");
       process.exit(1);
     }
 
-    spinner.stop("Image built");
+    p.log.success("Image built");
   } else {
     // Ensure the compose file references our custom image
     if (existsSync(composeFile)) {
@@ -1620,17 +1621,21 @@ async function runUpdate(options: { local?: boolean }) {
       }
     }
 
-    spinner.start("Pulling latest image...");
+    p.log.step(
+      "Pulling latest image... (several hundred MB, this can take a few minutes)",
+    );
 
-    const pullResult = await runDockerCommand([...composeArgs, "pull"]);
+    const pullResult = await runDockerCommandStreaming([
+      ...composeArgs,
+      "pull",
+    ]);
 
     if (pullResult.status !== 0) {
-      spinner.stop("Failed to pull");
-      p.log.error(pullResult.stderr || "Unknown error");
+      p.log.error("Failed to pull image. See the Docker output above.");
       process.exit(1);
     }
 
-    spinner.stop("Image updated");
+    p.log.success("Image updated");
   }
 
   const restart = await p.confirm({
@@ -1922,6 +1927,29 @@ function runDockerCommand(
 
     child.on("error", (err) => {
       resolve({ status: 1, stdout: "", stderr: err.message });
+    });
+  });
+}
+
+/**
+ * Runs docker with inherited stdio so its progress output reaches the terminal.
+ *
+ * `runDockerCommand` buffers output and only surfaces it after the process
+ * exits, which makes multi-minute operations like `pull` and `build` look
+ * frozen behind a spinner. Use this for anything long-running so users can see
+ * per-layer download progress instead of guessing whether it hung.
+ */
+function runDockerCommandStreaming(
+  args: string[],
+): Promise<{ status: number }> {
+  return new Promise((resolve) => {
+    const child = spawn("docker", args, { stdio: "inherit" });
+
+    child.on("close", (code) => resolve({ status: code ?? 1 }));
+
+    child.on("error", (err) => {
+      p.log.error(err.message);
+      resolve({ status: 1 });
     });
   });
 }
